@@ -16,7 +16,7 @@ int prime[N];
 string RESULT_TABLE_COLUMNS = "M;Openmp Loop Scheduling Method;Chunk Size;T1;T2;T4;T8;S2;S4;S8\n";
 
 double
-findPrimes(string scheduleType, int M, int chunk_size, int num_threads);
+findPrimes(omp_sched_t kind, int M, int chunk_size, int num_threads);
 int writeToCsvFile(int M, string method, int chunk_size, int t1, int t2, int t4, int t8);
 int printPrimes();
 int j = 0;
@@ -30,25 +30,25 @@ int main(int argc, char *argv[])
     int chunk_size = atoi(argv[argc - 2]);
     int t1, t2, t4, t8;
 
-    t1 = 100000 * findPrimes("dynamic", M, chunk_size, 1);
-    t2 = 100000 * findPrimes("dynamic", M, chunk_size, 2);
-    t4 = 100000 * findPrimes("dynamic", M, chunk_size, 4);
-    t8 = 100000 * findPrimes("dynamic", M, chunk_size, 8);
+    t1 = 100000 * findPrimes(omp_sched_dynamic, M, chunk_size, 1);
+    t2 = 100000 * findPrimes(omp_sched_dynamic, M, chunk_size, 2);
+    t4 = 100000 * findPrimes(omp_sched_dynamic, M, chunk_size, 4);
+    t8 = 100000 * findPrimes(omp_sched_dynamic, M, chunk_size, 8);
     writeToCsvFile(M, "dynamic", chunk_size, t1, t2, t4, t8);
 
-    t1 = 100000 * findPrimes("static", M, chunk_size, 1);
-    t2 = 100000 * findPrimes("static", M, chunk_size, 2);
-    t4 = 100000 * findPrimes("static", M, chunk_size, 4);
-    t8 = 100000 * findPrimes("static", M, chunk_size, 8);
+    t1 = 100000 * findPrimes(omp_sched_static, M, chunk_size, 1);
+    t2 = 100000 * findPrimes(omp_sched_static, M, chunk_size, 2);
+    t4 = 100000 * findPrimes(omp_sched_static, M, chunk_size, 4);
+    t8 = 100000 * findPrimes(omp_sched_static, M, chunk_size, 8);
     writeToCsvFile(M, "static", chunk_size, t1, t2, t4, t8);
 
-    t2 = 100000 * findPrimes("guided", M, chunk_size, 2);
-    t1 = 100000 * findPrimes("guided", M, chunk_size, 1);
-    t4 = 100000 * findPrimes("guided", M, chunk_size, 4);
-    t8 = 100000 * findPrimes("guided", M, chunk_size, 8);
+    t1 = 100000 * findPrimes(omp_sched_guided, M, chunk_size, 1);
+    t2 = 100000 * findPrimes(omp_sched_guided, M, chunk_size, 2);
+    t4 = 100000 * findPrimes(omp_sched_guided, M, chunk_size, 4);
+    t8 = 100000 * findPrimes(omp_sched_guided, M, chunk_size, 8);
     writeToCsvFile(M, "guided", chunk_size, t1, t2, t4, t8);
 
-    printPrimes();
+    //printPrimes();
     myFile.close();
 }
 
@@ -60,7 +60,7 @@ int writeToCsvFile(int M, string method, int chunk_size, int t1, int t2, int t4,
     return 0;
 }
 
-double findPrimes(string scheduleType, int M, int chunk_size, int num_threads)
+double findPrimes(omp_sched_t kind, int M, int chunk_size, int num_threads)
 {
     int k, n, quo, rem;
     int serialPart = sqrt(M);
@@ -89,7 +89,7 @@ double findPrimes(string scheduleType, int M, int chunk_size, int num_threads)
         j = j + 1;
         prime[j] = n;
         k = 1;
-        for (n = 5; n <= serialPart; n += 2)
+        for (n = 5; n < serialPart; n += 2)
         {
             k = 1;
             bool found = false;
@@ -125,130 +125,44 @@ double findPrimes(string scheduleType, int M, int chunk_size, int num_threads)
 
         omp_set_num_threads(num_threads);
 
-        if (scheduleType == "dynamic")
-        {
-            string schedule = "dynamic";
-            t1 = omp_get_wtime();
-            omp_set_schedule(omp_sched_dynamic, chunk_size);
+        t1 = omp_get_wtime();
+        omp_set_schedule(kind, chunk_size);
 #pragma omp parallel shared(prime, j) private(n, k, quo, rem, found)
-            {
+        {
 #pragma omp for nowait
-                for (n = serialPart; n < M - 1; n += 2)
-                {
+            for (n = serialPart; n < M - 1; n += 2)
+            {
 
-                    k = 1;
-                    found = false;
-                    while (prime[k] & !found)
+                k = 1;
+                found = false;
+                while (prime[k] & !found)
+                {
+                    quo = n / prime[k];
+                    rem = n % prime[k];
+                    if (rem != 0)
                     {
-                        quo = n / prime[k];
-                        rem = n % prime[k];
-                        if (rem != 0)
+                        if (quo <= prime[k])
                         {
-                            if (quo <= prime[k])
-                            {
 #pragma omp critical
-                                {
-                                    j += 1;
-                                    prime[j] = n;
-                                    found = true;
-                                }
-                            }
-                            else
                             {
-                                k += 1;
+                                j += 1;
+                                prime[j] = n;
+                                found = true;
                             }
                         }
                         else
                         {
-                            break;
+                            k += 1;
                         }
                     }
-                }
-            }
-            t2 = omp_get_wtime();
-        }
-        else if (scheduleType == "static")
-        {
-            t1 = omp_get_wtime();
-            omp_set_schedule(omp_sched_static, chunk_size);
-#pragma omp parallel shared(prime, j) private(n, k, quo, rem, found)
-            {
-#pragma omp for nowait
-                for (n = serialPart; n < M; n += 2)
-                {
-
-                    k = 1;
-                    found = false;
-                    while (prime[k] & !found)
+                    else
                     {
-                        quo = n / prime[k];
-                        rem = n % prime[k];
-                        if (rem != 0)
-                        {
-                            if (quo <= prime[k])
-                            {
-#pragma omp critical
-                                {
-                                    j += 1;
-                                    prime[j] = n;
-                                    found = true;
-                                }
-                            }
-                            else
-                            {
-                                k += 1;
-                            }
-                        }
-                        else
-                        {
-                            break;
-                        }
+                        break;
                     }
                 }
             }
-            t2 = omp_get_wtime();
         }
-        else
-        {
-            omp_set_schedule(omp_sched_guided, chunk_size);
-            t1 = omp_get_wtime();
-#pragma omp parallel shared(prime, j) private(n, k, quo, rem, found)
-            {
-#pragma omp for nowait
-                for (n = serialPart; n < M; n += 2)
-                {
-
-                    k = 1;
-                    found = false;
-                    while (prime[k] & !found)
-                    {
-                        quo = n / prime[k];
-                        rem = n % prime[k];
-                        if (rem != 0)
-                        {
-                            if (quo <= prime[k])
-                            {
-#pragma omp critical
-                                {
-                                    j += 1;
-                                    prime[j] = n;
-                                    found = true;
-                                }
-                            }
-                            else
-                            {
-                                k += 1;
-                            }
-                        }
-                        else
-                        {
-                            break;
-                        }
-                    }
-                }
-            }
-            t2 = omp_get_wtime();
-        }
+        t2 = omp_get_wtime();
     }
 
     return t2 - t1;
@@ -263,5 +177,6 @@ int printPrimes()
         cout << prime[k] << endl;
     }
 
+    cout << "TOTAL: " << j + 1 << endl;
     return 0;
 }
